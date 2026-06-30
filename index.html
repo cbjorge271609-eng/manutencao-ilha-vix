@@ -256,6 +256,9 @@ html,body{height:100%;height:100dvh;font-family:var(--fn);background:var(--bg);c
     <!-- PAGE: DASHBOARD -->
     <div class="page active" id="pg-dashboard">
       <div id="dash-admin-bar" style="display:none" class="admin-bar">🔑 Modo Administrador — acesso total</div>
+      <div id="dash-relatorio-btn" style="display:none;margin-bottom:12px">
+        <button class="btn btn-secondary btn-full" onclick="abrirRelatorio7Dias()">📄 Relatório dos Últimos 7 Dias</button>
+      </div>
       <div class="kpi-grid" id="dash-kpis"></div>
       <div class="card">
         <div class="card-header"><div class="card-title">📅 Checklist — Últimos 14 dias</div></div>
@@ -405,7 +408,7 @@ html,body{height:100%;height:100dvh;font-family:var(--fn);background:var(--bg);c
       <div class="bnav-icon">📈</div>
       <div class="bnav-label">Performance</div>
     </div>
-    <div class="bnav-item" onclick="navTo('mais',this)">
+    <div class="bnav-item" onclick="navTo('mais',this)" id="bnav-mais">
       <div class="bnav-icon">⚙️</div>
       <div class="bnav-label">Mais</div>
     </div>
@@ -485,6 +488,7 @@ html,body{height:100%;height:100dvh;font-family:var(--fn);background:var(--bg);c
     </div>
     <div class="modal-body">
       <input type="hidden" id="md-id">
+      <div id="md-aberto-info" style="display:none;font-size:12px;color:var(--muted);background:var(--surface2);border-radius:8px;padding:8px 12px;margin-bottom:12px"></div>
       <div class="fgrp"><label>Item / Local</label><input id="md-item" type="text" placeholder="Ex: Fritadeira 01 — superaquecendo"></div>
       <div class="fgrp"><label>Setor</label>
         <select id="md-setor">
@@ -507,7 +511,7 @@ html,body{height:100%;height:100dvh;font-family:var(--fn);background:var(--bg);c
         </select>
       </div>
       <div class="fgrp"><label>Executor principal</label>
-        <select id="md-executor" onchange="toggleRonaldoCopy()">
+        <select id="md-executor" onchange="toggleRonaldoCopy();toggleFornecedor()">
           <option value="Flavinho">Flavinho (+ cópia para Ronaldo)</option>
           <option value="Ronaldo">Ronaldo (somente)</option>
           <option value="Terceiro">Terceiro</option>
@@ -516,10 +520,11 @@ html,body{height:100%;height:100dvh;font-family:var(--fn);background:var(--bg);c
       <div id="md-ronaldo-copy" style="background:var(--bluefaint);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--blue);margin-bottom:10px">
         ℹ️ Ronaldo será automaticamente notificado como responsável pela supervisão.
       </div>
+      <div class="fgrp" id="md-fornecedor-grp" style="display:none"><label>Nome do Fornecedor / Prestador</label><input id="md-fornecedor" type="text" placeholder="Ex: Refrigeração Capixaba Ltda"></div>
       <div class="fgrp"><label>Prazo</label><input type="date" id="md-prazo"></div>
       <div class="fgrp"><label>Custo Estimado (R$)</label><input type="number" id="md-custo" placeholder="0,00" step="0.01"></div>
       <div class="fgrp" id="md-status-grp" style="display:none"><label>Status</label>
-        <select id="md-status">
+        <select id="md-status" onchange="toggleFornecedor()">
           <option>⏳ Pendente</option>
           <option>🔄 Em execução</option>
           <option>✅ Concluído</option>
@@ -555,6 +560,21 @@ html,body{height:100%;height:100dvh;font-family:var(--fn);background:var(--bg);c
     <div class="modal-footer">
       <button class="btn btn-secondary" style="flex:0.5" onclick="closeModal('modal-sem')">Cancelar</button>
       <button class="btn btn-primary" style="flex:1" onclick="criarSemana()">Gerar Checklist</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: RELATÓRIO 7 DIAS -->
+<div class="modal-overlay" id="modal-relatorio">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title">📄 Relatório — Últimos 7 dias</div>
+      <button class="modal-close" onclick="closeModal('modal-relatorio')">×</button>
+    </div>
+    <div class="modal-body" id="relatorio-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary btn-full" onclick="exportarRelatorioCSV()">📥 Exportar CSV</button>
     </div>
   </div>
 </div>
@@ -772,10 +792,10 @@ function mapUserFromDb(r){ return {id:r.id, nome:r.nome, senha:r.senha, cargo:r.
 function mapUserToDb(u){ return {id:u.id, nome:u.nome, senha:u.senha, cargo:u.cargo||'', perfil:u.perfil, ativo:u.ativo!==false}; }
 function mapDemFromDb(r){ return {id:r.id, item:r.item, setor:r.setor, desc:r.descricao, prio:r.prio, executor:r.executor,
   prazo:r.prazo, custo:r.custo, status:r.status, solucao:r.solucao, abertoPor:r.aberto_por, copiaPara:r.copia_para,
-  origem:r.origem, origemTaskId:r.origem_task_id, foto:r.foto, criadoEm:new Date(r.created_at).getTime(), atualizadoEm:new Date(r.atualizado_em||r.created_at).getTime() }; }
+  origem:r.origem, origemTaskId:r.origem_task_id, foto:r.foto, fornecedor:r.fornecedor||'', criadoEm:new Date(r.created_at).getTime(), atualizadoEm:new Date(r.atualizado_em||r.created_at).getTime() }; }
 function mapDemToDb(d){ return {id:d.id, item:d.item, setor:d.setor, descricao:d.desc||'', prio:d.prio, executor:d.executor,
   prazo:d.prazo||null, custo:d.custo?parseFloat(d.custo):null, status:d.status, solucao:d.solucao||'', aberto_por:d.abertoPor,
-  copia_para:d.copiaPara, origem:d.origem||null, origem_task_id:d.origemTaskId||null, foto:d.foto||null,
+  copia_para:d.copiaPara, origem:d.origem||null, origem_task_id:d.origemTaskId||null, foto:d.foto||null, fornecedor:d.fornecedor||null,
   atualizado_em:new Date().toISOString() }; }
 function mapSemFromDb(r){ return {id:r.id, dataVistoria:r.data_vistoria, responsavel:r.responsavel, criadoEm:new Date(r.created_at).getTime(), tarefas:[]}; }
 function mapTaskFromDb(r){ return {id:r.id, nome:r.nome, setor:r.setor, dia:r.dia, prio:r.prio, status:r.status,
@@ -875,7 +895,10 @@ function initApp(){
   if(isGerente()){
     document.getElementById('btn-nova-sem').style.display='inline-flex';
     document.getElementById('admin-task-bar').style.display=isAdmin()?'block':'none';
+    document.getElementById('dash-relatorio-btn').style.display='block';
   }
+  // Apenas Admin acessa a página "Mais" (configurações)
+  document.getElementById('bnav-mais').style.display=isAdmin()?'flex':'none';
   updateBadges();
   renderDashboard();
   // Carregar semana mais recente
@@ -883,12 +906,18 @@ function initApp(){
 }
 
 function navTo(page,el){
+  if(page==='mais'&&!isAdmin()){ toast('Acesso restrito ao administrador','error'); return; }
   document.querySelectorAll('.bnav-item').forEach(b=>b.classList.remove('active'));
   if(el) el.classList.add('active');
   goPage(page);
 }
 
 function goPage(page){
+  const PAGINAS_ADMIN=['mais','equipamentos','usuarios','backup','preventiva'];
+  if(PAGINAS_ADMIN.includes(page)&&!isAdmin()){
+    toast('Acesso restrito ao administrador','error');
+    page='dashboard';
+  }
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   const pg=document.getElementById('pg-'+page);
   if(pg) pg.classList.add('active');
@@ -915,6 +944,16 @@ function updateBadges(){
   const badgeCk=document.getElementById('bnav-ck-badge');
   badgeCk.style.display=ckPend>0?'':'none';
   badgeCk.textContent=ckPend;
+}
+
+// Re-renderiza badges + a página visível na tela, garantindo atualização instantânea
+// sem precisar sair e voltar no app, não importa onde a ação foi disparada.
+function refreshAllViews(){
+  updateBadges();
+  const renders={dashboard:renderDashboard,checklist:renderChecklist,demandas:renderDemandas,
+    performance:renderPerformance,equipamentos:renderEquips,usuarios:renderUsuarios,
+    backup:renderBackup,preventiva:renderPreventiva};
+  if(renders[curPage]) renders[curPage]();
 }
 
 // ════════════════════════════════════════════════════════
@@ -1171,7 +1210,7 @@ function salvarTask(){
       toast('Tarefa atualizada!','success');
     }
 
-    save(); closeModal('modal-task'); renderChecklist(); updateBadges();
+    save(); closeModal('modal-task'); refreshAllViews();
     syncUpsertTask(t,_curSemId);
   }
 
@@ -1224,7 +1263,7 @@ function criarSemana(){
   const novaSemana={id:gid(),dataVistoria:data,responsavel:resp,criadoEm:Date.now(),tarefas};
   S.semanas.push(novaSemana);
   curSemIdx=S.semanas.length-1;
-  save(); closeModal('modal-sem'); renderChecklist(); updateBadges();
+  save(); closeModal('modal-sem'); refreshAllViews();
   toast(`Semana criada com ${tarefas.length} tarefas!`,'success');
   syncUpsertSemana(novaSemana).then(()=>syncBulkTasks(tarefas,novaSemana.id));
 }
@@ -1269,7 +1308,7 @@ function salvarAddTask(){
     status:'⏳ Pendente', obs:'', nc:false, criadoEm:Date.now(), atualizadoEm:Date.now(),
   };
   sem.tarefas.push(tarefa);
-  save(); closeModal('modal-add-task'); renderChecklist();
+  save(); closeModal('modal-add-task'); refreshAllViews();
   toast('Tarefa adicionada!','success');
   syncUpsertTask(tarefa,semId);
 }
@@ -1277,7 +1316,7 @@ function excluirTask(semId,taskId){
   if(!confirm('Excluir esta tarefa?')) return;
   const sem=S.semanas.find(s=>s.id===semId); if(!sem) return;
   sem.tarefas=sem.tarefas.filter(t=>t.id!==taskId);
-  save(); renderChecklist(); toast('Tarefa removida','info');
+  save(); refreshAllViews(); toast('Tarefa removida','info');
   syncDeleteTask(taskId);
 }
 
@@ -1294,6 +1333,7 @@ function renderDemandas(){
     {k:'execucao',l:'🔄 Em exec.'},
     {k:'concluido',l:'✅ Concluído'},
     {k:'urgente',l:'🔴 Urgente'},
+    {k:'terceiro',l:'⚠️ Terceiro'},
   ];
   document.getElementById('dem-filters').innerHTML=filtros.map(f=>`
     <button class="btn btn-sm ${demFilter===f.k?'btn-primary':'btn-ghost'}" onclick="setDemFilter('${f.k}')">${f.l}</button>`).join('');
@@ -1307,6 +1347,7 @@ function renderDemandas(){
     if(demFilter==='execucao') return d.status==='🔄 Em execução';
     if(demFilter==='concluido') return d.status==='✅ Concluído';
     if(demFilter==='urgente') return d.prio==='🔴 URGENTE';
+    if(demFilter==='terceiro') return d.status==='⚠️ Requer terceiro'||d.executor==='Terceiro';
     return true;
   }).sort((a,b)=>b.criadoEm-a.criadoEm);
 
@@ -1324,7 +1365,7 @@ function renderDemandas(){
           ${d.origem==='checklist'?`<span class="badge badge-purple" style="font-size:10px">📅 NC Auto</span>`:''}
         </div>
         <div class="list-item-title">${d.item}</div>
-        <div class="list-item-sub">${d.setor} · ${d.executor} · ${d.prazo?fmtDate(d.prazo):'sem prazo'}</div>
+        <div class="list-item-sub">${d.setor} · 👤 ${d.abertoPor||'—'} · ${d.executor}${d.fornecedor?' ('+d.fornecedor+')':''} · ${d.prazo?fmtDate(d.prazo):'sem prazo'}</div>
       </div>
       <div class="list-item-right">
         <span class="badge ${stBadge(d.status)}" style="font-size:10px">${d.status.split(' ')[0]} ${d.status.split(' ')[1]||''}</span>
@@ -1340,9 +1381,19 @@ function toggleRonaldoCopy(){
   document.getElementById('md-ronaldo-copy').style.display=exec==='Flavinho'?'block':'none';
 }
 
+// Mostra o campo de fornecedor quando o executor é "Terceiro" OU o status é "Requer terceiro"
+function toggleFornecedor(){
+  const exec=document.getElementById('md-executor').value;
+  const statusEl=document.getElementById('md-status');
+  const status=statusEl?statusEl.value:'';
+  const mostrar = exec==='Terceiro' || status==='⚠️ Requer terceiro';
+  document.getElementById('md-fornecedor-grp').style.display=mostrar?'block':'none';
+}
+
 function abrirModalDemanda(){
   document.getElementById('md-id').value='';
   document.getElementById('md-title').textContent='🚨 Nova Demanda';
+  document.getElementById('md-aberto-info').style.display='none';
   document.getElementById('md-item').value='';
   document.getElementById('md-desc').value='';
   document.getElementById('md-custo').value='';
@@ -1354,6 +1405,8 @@ function abrirModalDemanda(){
   document.getElementById('md-status-grp').style.display='none';
   document.getElementById('md-solucao-grp').style.display='none';
   document.getElementById('md-foto-grp').style.display='none';
+  document.getElementById('md-fornecedor').value='';
+  document.getElementById('md-fornecedor-grp').style.display='none';
   openModal('modal-dem');
 }
 
@@ -1363,6 +1416,8 @@ function abrirDetalheDem(id){
   if(isGerente()){
     document.getElementById('md-id').value=id;
     document.getElementById('md-title').textContent='✏️ Editar Demanda';
+    document.getElementById('md-aberto-info').textContent='👤 Aberto por: '+(d.abertoPor||'—')+' · '+fmtTs(d.criadoEm);
+    document.getElementById('md-aberto-info').style.display='block';
     document.getElementById('md-item').value=d.item||'';
     document.getElementById('md-setor').value=d.setor||'';
     document.getElementById('md-prio').value=d.prio||'🟡 MÉDIA';
@@ -1375,6 +1430,8 @@ function abrirDetalheDem(id){
     document.getElementById('md-solucao-grp').style.display='block';
     document.getElementById('md-status').value=d.status||'⏳ Pendente';
     document.getElementById('md-solucao').value=d.solucao||'';
+    document.getElementById('md-fornecedor').value=d.fornecedor||'';
+    toggleFornecedor();
     if(d.foto){
       document.getElementById('md-foto-grp').style.display='block';
       document.getElementById('md-foto-view').src=d.foto;
@@ -1397,14 +1454,16 @@ function salvarDemanda(){
     custo:document.getElementById('md-custo').value,
     status:editId?document.getElementById('md-status').value:'⏳ Pendente',
     solucao:editId?document.getElementById('md-solucao').value:'',
-    abertoPor:S.cu.nome, criadoEm:editId?(S.demandas.find(x=>x.id===editId)||{}).criadoEm||Date.now():Date.now(),
+    fornecedor:document.getElementById('md-fornecedor').value.trim(),
+    abertoPor:editId?(S.demandas.find(x=>x.id===editId)||{}).abertoPor||S.cu.nome:S.cu.nome,
+    criadoEm:editId?(S.demandas.find(x=>x.id===editId)||{}).criadoEm||Date.now():Date.now(),
     atualizadoEm:Date.now(),
     // Se executor=Flavinho, cópia automática para Ronaldo
     copiaPara:exec==='Flavinho'?'Ronaldo':null,
   };
   if(editId){const idx=S.demandas.findIndex(x=>x.id===editId);if(idx>=0)S.demandas[idx]=obj;}
   else S.demandas.unshift(obj);
-  save();closeModal('modal-dem');renderDemandas();renderDashboard();updateBadges();
+  save();closeModal('modal-dem');refreshAllViews();
   toast(editId?'Demanda atualizada!':'Demanda aberta!','success');
   if(!editId&&exec==='Flavinho') toast('📋 Ronaldo notificado como supervisor','info');
   syncUpsertDemanda(obj);
@@ -1413,6 +1472,81 @@ function salvarDemanda(){
 // ════════════════════════════════════════════════════════
 // PERFORMANCE
 // ════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// RELATÓRIO 7 DIAS
+// ════════════════════════════════════════════════════════
+let _relatorioCache=[];
+
+function abrirRelatorio7Dias(){
+  const cutoff=Date.now()-7*86400000;
+  const demandas7d=S.demandas.filter(d=>d.criadoEm>=cutoff);
+  _relatorioCache=demandas7d;
+
+  const total=demandas7d.length;
+  const conc=demandas7d.filter(d=>d.status==='✅ Concluído').length;
+  const pend=demandas7d.filter(d=>d.status==='⏳ Pendente').length;
+  const exec=demandas7d.filter(d=>d.status==='🔄 Em execução').length;
+
+  function statsExec(nome){
+    const mine=demandas7d.filter(d=>d.executor===nome||d.copiaPara===nome);
+    const c=mine.filter(d=>d.status==='✅ Concluído').length;
+    const ef=mine.length>0?Math.round(c/mine.length*100):0;
+    return {total:mine.length,conc:c,ef};
+  }
+  const ron=statsExec('Ronaldo'), flav=statsExec('Flavinho');
+
+  let html=`
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Período: ${fmtTs(cutoff)} até ${fmtTs(Date.now())}</div>
+    <div class="kpi-grid">
+      <div class="kpi-card blue"><div class="kpi-label">Total</div><div class="kpi-val" style="font-size:22px">${total}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Concluídas</div><div class="kpi-val" style="font-size:22px">${conc}</div></div>
+      <div class="kpi-card orange"><div class="kpi-label">Pendentes</div><div class="kpi-val" style="font-size:22px">${pend}</div></div>
+      <div class="kpi-card blue"><div class="kpi-label">Em Execução</div><div class="kpi-val" style="font-size:22px">${exec}</div></div>
+    </div>`;
+
+  if(isGerente()){
+    html+=`
+    <div class="divider"></div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:10px">👔 Eficiência — Ronaldo</div>
+    <div class="prog-bar" style="margin-bottom:6px"><div class="prog-fill" style="width:${ron.ef}%;background:var(--blue)"></div></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">${ron.conc}/${ron.total} concluídas · ${ron.ef}% de eficiência</div>
+
+    <div style="font-size:13px;font-weight:700;margin-bottom:10px">🔧 Eficiência — Flavinho</div>
+    <div class="prog-bar" style="margin-bottom:6px"><div class="prog-fill" style="width:${flav.ef}%;background:var(--orange)"></div></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px">${flav.conc}/${flav.total} concluídas · ${flav.ef}% de eficiência</div>`;
+  }
+
+  html+=`<div class="divider"></div><div style="font-size:13px;font-weight:700;margin-bottom:10px">📋 Demandas do Período</div>`;
+  html+= demandas7d.length ? demandas7d.sort((a,b)=>b.criadoEm-a.criadoEm).map(d=>`
+    <div class="list-item" style="cursor:default">
+      <div class="list-item-body">
+        <div style="display:flex;gap:6px;margin-bottom:4px">
+          <span class="badge ${badgeClass(d.prio)}" style="font-size:10px">${d.prio}</span>
+          <span class="badge ${stBadge(d.status)}" style="font-size:10px">${d.status}</span>
+        </div>
+        <div class="list-item-title">${d.item}</div>
+        <div class="list-item-sub">${d.setor} · ${d.executor} · ${fmtTs(d.criadoEm)}</div>
+        ${d.solucao?`<div style="font-size:11px;color:var(--muted);margin-top:4px">💬 ${d.solucao}</div>`:''}
+      </div>
+    </div>`).join('') : `<div class="empty"><div class="empty-icon">📋</div><div class="empty-title">Sem demandas nos últimos 7 dias</div></div>`;
+
+  document.getElementById('relatorio-body').innerHTML=html;
+  openModal('modal-relatorio');
+}
+
+function exportarRelatorioCSV(){
+  if(!_relatorioCache.length){toast('Nada para exportar','error');return;}
+  const rows=[['#','Item','Setor','Prioridade','Status','Executor','Solução/Observação','Data'],
+    ..._relatorioCache.map(d=>[d.id.substr(-6).toUpperCase(),d.item,d.setor,d.prio,d.status,d.executor,d.solucao||d.desc||'',fmtTs(d.criadoEm)])];
+  const csv=rows.map(r=>r.map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url;
+  a.download=`relatorio_7dias_ilha_${new Date().toISOString().split('T')[0]}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+  toast('Relatório exportado!','success');
+}
+
 function renderPerformance(){
   const dias=parseInt(document.getElementById('perf-period').value)||9999;
   const cutoff=dias>0?Date.now()-dias*86400000:0;
@@ -1519,13 +1653,13 @@ function salvarEquip(){
     freq:document.getElementById('meq-freq').value,obs:document.getElementById('meq-obs').value};
   if(id){const idx=S.equips.findIndex(x=>x.id===id);if(idx>=0)S.equips[idx]=obj;}
   else S.equips.push(obj);
-  save();closeModal('modal-equip');renderEquips();toast(id?'Atualizado!':'Adicionado!','success');
+  save();closeModal('modal-equip');refreshAllViews();toast(id?'Atualizado!':'Adicionado!','success');
   syncUpsertEquip(obj);
 }
 function excluirEquip(id){
   if(!confirm('Excluir equipamento?')) return;
   S.equips=S.equips.filter(x=>x.id!==id);
-  save();renderEquips();toast('Removido','info');
+  save();refreshAllViews();toast('Removido','info');
   syncDeleteEquip(id);
 }
 
@@ -1569,7 +1703,7 @@ function salvarUsuario(){
   const obj={id:id||gid(),nome,senha,cargo:document.getElementById('mu-cargo').value,perfil:document.getElementById('mu-perfil').value,ativo:true};
   if(id){const idx=S.users.findIndex(x=>x.id===id);if(idx>=0)S.users[idx]=obj;}
   else S.users.push(obj);
-  save();closeModal('modal-user');renderUsuarios();toast(id?'Atualizado!':'Criado!','success');
+  save();closeModal('modal-user');refreshAllViews();toast(id?'Atualizado!':'Criado!','success');
   syncUpsertUser(obj);
 }
 

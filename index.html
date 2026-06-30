@@ -1625,8 +1625,8 @@ function exportarBackup(){
   toast('Backup exportado!','success'); renderBackup();
 }
 function exportarCSV(){
-  const rows=[['#','Item','Setor','Prioridade','Status','Executor','Prazo','Aberto Por','Data'],...S.demandas.map(d=>[
-    d.id.substr(-6).toUpperCase(),d.item,d.setor,d.prio,d.status,d.executor,d.prazo||'',d.abertoPor||'',fmtTs(d.criadoEm)])];
+  const rows=[['#','Item','Setor','Prioridade','Status','Executor','Prazo','Data'],...S.demandas.map(d=>[
+    d.id.substr(-6).toUpperCase(),d.item,d.setor,d.prio,d.status,d.executor,d.prazo||'',fmtTs(d.criadoEm)])];
   const csv=rows.map(r=>r.map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob);

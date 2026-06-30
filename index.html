@@ -222,6 +222,7 @@ html,body{height:100%;font-family:var(--fn);background:var(--bg);color:var(--tex
 .scroll-x{overflow-x:auto;-webkit-overflow-scrolling:touch;display:flex;gap:8px;padding-bottom:4px}
 .scroll-x::-webkit-scrollbar{display:none}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body>
 <div class="toast-wrap" id="toasts"></div>
@@ -727,11 +728,28 @@ const DEF_EQUIPS=[
 ];
 
 // ════════════════════════════════════════════════════════
+// SUPABASE CONFIG
+// ════════════════════════════════════════════════════════
+const SUPABASE_URL = 'https://kerjawehutvbeoafqtoj.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtlcmphd2VodXR2YmVvYWZxdG9qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3ODk5OTUsImV4cCI6MjA5ODM2NTk5NX0.thODpyhZ4JFD8q_8f-3j4oy2JEnkg0XhMYe0HaNYpMc';
+let sb=null, ONLINE=false;
+try{
+  if(window.supabase && SUPABASE_URL && SUPABASE_KEY){
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    ONLINE = true;
+  }
+}catch(e){ ONLINE=false; }
+
+// ════════════════════════════════════════════════════════
 // STATE
 // ════════════════════════════════════════════════════════
 let S={users:[],equips:[],demandas:[],semanas:[],cu:null};
-function save(){try{localStorage.setItem('ilha_v2',JSON.stringify(S));}catch(e){}}
-function load(){
+
+function save(){
+  try{localStorage.setItem('ilha_v2',JSON.stringify(S));}catch(e){}
+}
+
+function loadLocal(){
   try{
     const d=localStorage.getItem('ilha_v2');
     if(d) S=JSON.parse(d);
@@ -739,7 +757,6 @@ function load(){
     if(!S.equips?.length) S.equips=JSON.parse(JSON.stringify(DEF_EQUIPS));
     if(!S.demandas) S.demandas=[];
     if(!S.semanas) S.semanas=[];
-    // Migração: garante que todo usuário padrão tenha pelo menos a senha 123 se nunca foi alterada manualmente
     if(!S.senhaMigrada123){
       S.users.forEach(u=>{ u.senha='123'; });
       S.senhaMigrada123=true;
@@ -747,11 +764,71 @@ function load(){
     }
   }catch(e){S={users:JSON.parse(JSON.stringify(DEF_USERS)),equips:JSON.parse(JSON.stringify(DEF_EQUIPS)),demandas:[],semanas:[],cu:null};}
 }
-load();
+
+// Mapeamento de campos: app (camelCase) <-> banco (snake_case)
+function mapEquipFromDb(r){ return {id:r.id, nome:r.nome, setor:r.setor, freq:r.freq, obs:r.obs||''}; }
+function mapEquipToDb(e){ return {id:e.id, nome:e.nome, setor:e.setor, freq:e.freq, obs:e.obs||''}; }
+function mapUserFromDb(r){ return {id:r.id, nome:r.nome, senha:r.senha, cargo:r.cargo, perfil:r.perfil, ativo:r.ativo}; }
+function mapUserToDb(u){ return {id:u.id, nome:u.nome, senha:u.senha, cargo:u.cargo||'', perfil:u.perfil, ativo:u.ativo!==false}; }
+function mapDemFromDb(r){ return {id:r.id, item:r.item, setor:r.setor, desc:r.descricao, prio:r.prio, executor:r.executor,
+  prazo:r.prazo, custo:r.custo, status:r.status, solucao:r.solucao, abertoPor:r.aberto_por, copiaPara:r.copia_para,
+  origem:r.origem, origemTaskId:r.origem_task_id, foto:r.foto, criadoEm:new Date(r.created_at).getTime(), atualizadoEm:new Date(r.atualizado_em||r.created_at).getTime() }; }
+function mapDemToDb(d){ return {id:d.id, item:d.item, setor:d.setor, descricao:d.desc||'', prio:d.prio, executor:d.executor,
+  prazo:d.prazo||null, custo:d.custo?parseFloat(d.custo):null, status:d.status, solucao:d.solucao||'', aberto_por:d.abertoPor,
+  copia_para:d.copiaPara, origem:d.origem||null, origem_task_id:d.origemTaskId||null, foto:d.foto||null,
+  atualizado_em:new Date().toISOString() }; }
+function mapSemFromDb(r){ return {id:r.id, dataVistoria:r.data_vistoria, responsavel:r.responsavel, criadoEm:new Date(r.created_at).getTime(), tarefas:[]}; }
+function mapTaskFromDb(r){ return {id:r.id, nome:r.nome, setor:r.setor, dia:r.dia, prio:r.prio, status:r.status,
+  obs:r.obs||'', foto:r.foto||'', nc:r.nc||false, atualizadoEm:r.atualizado_em?new Date(r.atualizado_em).getTime():null, atualizadoPor:r.atualizado_por }; }
+function mapTaskToDb(t,semId){ return {id:t.id, semana_id:semId, nome:t.nome, setor:t.setor, dia:t.dia, prio:t.prio,
+  status:t.status, obs:t.obs||'', foto:t.foto||null, nc:t.nc||false, atualizado_em:new Date().toISOString(), atualizado_por:t.atualizadoPor||null }; }
+
+async function loadFromSupabase(){
+  if(!ONLINE) return false;
+  try{
+    const [u,e,dm,sm] = await Promise.all([
+      sb.from('usuarios').select('*').order('nome'),
+      sb.from('equipamentos').select('*').order('nome'),
+      sb.from('demandas').select('*').order('created_at',{ascending:false}),
+      sb.from('semanas').select('*').order('data_vistoria',{ascending:false}),
+    ]);
+    if(u.error||e.error||dm.error||sm.error) throw (u.error||e.error||dm.error||sm.error);
+
+    S.users = u.data.length ? u.data.map(mapUserFromDb) : JSON.parse(JSON.stringify(DEF_USERS));
+    S.equips = e.data.length ? e.data.map(mapEquipFromDb) : JSON.parse(JSON.stringify(DEF_EQUIPS));
+    S.demandas = dm.data.map(mapDemFromDb);
+    S.semanas = sm.data.map(mapSemFromDb).reverse(); // ordem cronológica crescente
+
+    // Carregar tarefas de todas as semanas
+    if(S.semanas.length){
+      const semIds = S.semanas.map(s=>s.id);
+      const {data:tasks, error:terr} = await sb.from('tarefas').select('*').in('semana_id',semIds);
+      if(!terr && tasks){
+        S.semanas.forEach(sem=>{
+          sem.tarefas = tasks.filter(t=>t.semana_id===sem.id).map(mapTaskFromDb);
+        });
+      }
+    }
+    save();
+    return true;
+  }catch(err){
+    console.warn('Supabase indisponível, usando dados locais.', err);
+    return false;
+  }
+}
+
+async function load(){
+  loadLocal(); // sempre carrega cache local primeiro (resposta instantânea)
+  if(ONLINE){
+    const ok = await loadFromSupabase();
+    if(!ok) toast('⚠️ Sem conexão com o banco — usando dados salvos no aparelho','info');
+  }
+}
 
 const gid=()=>Date.now().toString(36)+Math.random().toString(36).substr(2,5);
 const isAdmin=()=>S.cu?.perfil==='admin';
 const isGerente=()=>S.cu?.perfil==='gerente'||isAdmin();
+
 
 // ════════════════════════════════════════════════════════
 // AUTH
@@ -759,7 +836,22 @@ const isGerente=()=>S.cu?.perfil==='gerente'||isAdmin();
 document.getElementById('lp').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 document.getElementById('lu').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('lp').focus();});
 
-function doLogin(){
+let BOOTED=false;
+async function bootApp(){
+  await load();
+  BOOTED=true;
+  const btn=document.querySelector('#login-screen .btn-primary');
+  if(btn){ btn.disabled=false; btn.textContent='Entrar'; }
+}
+// Mostra estado de carregamento no botão de login enquanto sincroniza
+(function(){
+  const btn=document.querySelector('#login-screen .btn-primary');
+  if(btn){ btn.disabled=true; btn.textContent='Carregando...'; }
+})();
+bootApp();
+
+async function doLogin(){
+  if(!BOOTED){ toast('Aguarde o carregamento dos dados...','info'); return; }
   const n=document.getElementById('lu').value.trim();
   const p=document.getElementById('lp').value;
   const u=S.users.find(x=>x.nome.toLowerCase()===n.toLowerCase()&&x.senha===p&&x.ativo!==false);
@@ -1071,6 +1163,7 @@ function salvarTask(){
         };
         S.demandas.unshift(novaDem);
         toast(`⚠️ Plano de ação criado automaticamente para ${exec}${exec==='Flavinho'?' + Ronaldo':''}!`,'success');
+        syncUpsertDemanda(novaDem);
       } else {
         toast('Observação salva. Já existe um plano de ação aberto para este item.','info');
       }
@@ -1079,6 +1172,7 @@ function salvarTask(){
     }
 
     save(); closeModal('modal-task'); renderChecklist(); updateBadges();
+    syncUpsertTask(t,_curSemId);
   }
 
   // Se há foto nova selecionada, converte para base64 antes de salvar
@@ -1127,10 +1221,12 @@ function criarSemana(){
     criadoEm:Date.now(), atualizadoEm:Date.now(),
   }));
 
-  S.semanas.push({id:gid(),dataVistoria:data,responsavel:resp,criadoEm:Date.now(),tarefas});
+  const novaSemana={id:gid(),dataVistoria:data,responsavel:resp,criadoEm:Date.now(),tarefas};
+  S.semanas.push(novaSemana);
   curSemIdx=S.semanas.length-1;
   save(); closeModal('modal-sem'); renderChecklist(); updateBadges();
   toast(`Semana criada com ${tarefas.length} tarefas!`,'success');
+  syncUpsertSemana(novaSemana).then(()=>syncBulkTasks(tarefas,novaSemana.id));
 }
 
 // ── Selecionar semana ──────────────────────────────────
@@ -1175,12 +1271,14 @@ function salvarAddTask(){
   sem.tarefas.push(tarefa);
   save(); closeModal('modal-add-task'); renderChecklist();
   toast('Tarefa adicionada!','success');
+  syncUpsertTask(tarefa,semId);
 }
 function excluirTask(semId,taskId){
   if(!confirm('Excluir esta tarefa?')) return;
   const sem=S.semanas.find(s=>s.id===semId); if(!sem) return;
   sem.tarefas=sem.tarefas.filter(t=>t.id!==taskId);
   save(); renderChecklist(); toast('Tarefa removida','info');
+  syncDeleteTask(taskId);
 }
 
 // ════════════════════════════════════════════════════════
@@ -1309,6 +1407,7 @@ function salvarDemanda(){
   save();closeModal('modal-dem');renderDemandas();renderDashboard();updateBadges();
   toast(editId?'Demanda atualizada!':'Demanda aberta!','success');
   if(!editId&&exec==='Flavinho') toast('📋 Ronaldo notificado como supervisor','info');
+  syncUpsertDemanda(obj);
 }
 
 // ════════════════════════════════════════════════════════
@@ -1421,11 +1520,13 @@ function salvarEquip(){
   if(id){const idx=S.equips.findIndex(x=>x.id===id);if(idx>=0)S.equips[idx]=obj;}
   else S.equips.push(obj);
   save();closeModal('modal-equip');renderEquips();toast(id?'Atualizado!':'Adicionado!','success');
+  syncUpsertEquip(obj);
 }
 function excluirEquip(id){
   if(!confirm('Excluir equipamento?')) return;
   S.equips=S.equips.filter(x=>x.id!==id);
   save();renderEquips();toast('Removido','info');
+  syncDeleteEquip(id);
 }
 
 // ════════════════════════════════════════════════════════
@@ -1469,6 +1570,7 @@ function salvarUsuario(){
   if(id){const idx=S.users.findIndex(x=>x.id===id);if(idx>=0)S.users[idx]=obj;}
   else S.users.push(obj);
   save();closeModal('modal-user');renderUsuarios();toast(id?'Atualizado!':'Criado!','success');
+  syncUpsertUser(obj);
 }
 
 // ════════════════════════════════════════════════════════
@@ -1569,6 +1671,19 @@ document.querySelectorAll('.modal-overlay').forEach(o=>o.addEventListener('click
 // ════════════════════════════════════════════════════════
 // TOAST
 // ════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// SYNC HELPERS — gravam no Supabase em paralelo (não bloqueiam a UI)
+// ════════════════════════════════════════════════════════
+async function syncUpsertUser(u){ if(!ONLINE) return; try{ await sb.from('usuarios').upsert(mapUserToDb(u)); }catch(e){console.warn('sync user falhou',e);} }
+async function syncUpsertEquip(e){ if(!ONLINE) return; try{ await sb.from('equipamentos').upsert(mapEquipToDb(e)); }catch(err){console.warn('sync equip falhou',err);} }
+async function syncDeleteEquip(id){ if(!ONLINE) return; try{ await sb.from('equipamentos').delete().eq('id',id); }catch(e){console.warn('sync del equip falhou',e);} }
+async function syncUpsertDemanda(d){ if(!ONLINE) return; try{ await sb.from('demandas').upsert(mapDemToDb(d)); }catch(e){console.warn('sync demanda falhou',e);} }
+async function syncDeleteDemanda(id){ if(!ONLINE) return; try{ await sb.from('demandas').delete().eq('id',id); }catch(e){console.warn('sync del demanda falhou',e);} }
+async function syncUpsertSemana(sem){ if(!ONLINE) return; try{ await sb.from('semanas').upsert({id:sem.id, data_vistoria:sem.dataVistoria, responsavel:sem.responsavel}); }catch(e){console.warn('sync semana falhou',e);} }
+async function syncUpsertTask(t,semId){ if(!ONLINE) return; try{ await sb.from('tarefas').upsert(mapTaskToDb(t,semId)); }catch(e){console.warn('sync task falhou',e);} }
+async function syncDeleteTask(id){ if(!ONLINE) return; try{ await sb.from('tarefas').delete().eq('id',id); }catch(e){console.warn('sync del task falhou',e);} }
+async function syncBulkTasks(tarefas,semId){ if(!ONLINE) return; try{ await sb.from('tarefas').upsert(tarefas.map(t=>mapTaskToDb(t,semId))); }catch(e){console.warn('sync bulk tasks falhou',e);} }
+
 function toast(msg,type='info'){
   const w=document.getElementById('toasts');
   const t=document.createElement('div');

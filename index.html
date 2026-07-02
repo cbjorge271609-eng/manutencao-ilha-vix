@@ -532,7 +532,11 @@ html,body{height:100%;height:100dvh;font-family:var(--fn);background:var(--bg);c
           <option>⚠️ Requer terceiro</option>
         </select>
       </div>
-      <div class="fgrp" id="md-foto-grp" style="display:none"><label>📷 Foto anexada (do checklist)</label><img id="md-foto-view" style="max-width:100%;border-radius:10px;max-height:220px;object-fit:cover"></div>
+      <div class="fgrp">
+        <label>📷 Foto <span style="color:var(--muted);font-weight:400;text-transform:none">(opcional)</span></label>
+        <input type="file" id="md-foto" accept="image/*" capture="environment" onchange="previewFoto('md-foto','md-foto-preview')" style="color:var(--text)">
+        <img id="md-foto-preview" style="display:none;max-width:100%;border-radius:10px;margin-top:8px;max-height:200px;object-fit:cover">
+      </div>
       <div class="fgrp" id="md-solucao-grp" style="display:none"><label>Solução Aplicada</label><textarea id="md-solucao" placeholder="Descreva a solução..."></textarea></div>
     </div>
     <div class="modal-footer">
@@ -759,6 +763,40 @@ try{
     ONLINE = true;
   }
 }catch(e){ ONLINE=false; }
+
+// ════════════════════════════════════════════════════════
+// WHATSAPP — notificação automática via CallMeBot
+// ════════════════════════════════════════════════════════
+// COMO ATIVAR (uma vez, para cada pessoa que deve receber aviso):
+// 1. No WhatsApp da pessoa, envie mensagem para +34 644 59 71 67
+// 2. Escreva exatamente: I allow callmebot to send me messages
+// 3. O bot responde com um "apikey" (um número)
+// 4. Preencha phone (com DDI 55 + DDD + número, só dígitos) e apikey abaixo
+const WHATSAPP_CFG = {
+  'Cristiano': { phone:'', apikey:'' },
+  'Ronaldo':   { phone:'', apikey:'' },
+  'Flavinho':  { phone:'', apikey:'' },
+};
+const APP_URL = 'https://cbjorge271609-eng.github.io/manutencao-ilha-vix/';
+
+// Dispara notificação por WhatsApp para uma lista de nomes (ignora duplicados
+// e nomes sem telefone/apikey configurado). Usa técnica de "pixel" (Image)
+// para o GET funcionar mesmo sem cabeçalhos CORS na resposta do CallMeBot —
+// não precisamos ler a resposta, só que a mensagem seja enviada.
+function notificarWhatsApp(nomes, mensagem){
+  const enviados = new Set();
+  let count = 0;
+  (nomes||[]).filter(Boolean).forEach(nome=>{
+    if(enviados.has(nome)) return;
+    enviados.add(nome);
+    const cfg = WHATSAPP_CFG[nome];
+    if(!cfg || !cfg.phone || !cfg.apikey) return;
+    count++;
+    const url = `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(cfg.phone)}&text=${encodeURIComponent(mensagem)}&apikey=${encodeURIComponent(cfg.apikey)}`;
+    new Image().src = url;
+  });
+  return count;
+}
 
 // ════════════════════════════════════════════════════════
 // STATE
@@ -1404,7 +1442,9 @@ function abrirModalDemanda(){
   document.getElementById('md-prazo').value=d.toISOString().split('T')[0];
   document.getElementById('md-status-grp').style.display='none';
   document.getElementById('md-solucao-grp').style.display='none';
-  document.getElementById('md-foto-grp').style.display='none';
+  document.getElementById('md-foto').value='';
+  document.getElementById('md-foto-preview').style.display='none';
+  document.getElementById('md-foto-preview').src='';
   document.getElementById('md-fornecedor').value='';
   document.getElementById('md-fornecedor-grp').style.display='none';
   openModal('modal-dem');
@@ -1432,12 +1472,9 @@ function abrirDetalheDem(id){
     document.getElementById('md-solucao').value=d.solucao||'';
     document.getElementById('md-fornecedor').value=d.fornecedor||'';
     toggleFornecedor();
-    if(d.foto){
-      document.getElementById('md-foto-grp').style.display='block';
-      document.getElementById('md-foto-view').src=d.foto;
-    } else {
-      document.getElementById('md-foto-grp').style.display='none';
-    }
+    document.getElementById('md-foto').value='';
+    const mdPrev=document.getElementById('md-foto-preview');
+    if(d.foto){ mdPrev.src=d.foto; mdPrev.style.display='block'; } else { mdPrev.style.display='none'; mdPrev.src=''; }
     openModal('modal-dem');
   }
 }
@@ -1447,26 +1484,47 @@ function salvarDemanda(){
   if(!item){toast('Informe o item ou local','error');return;}
   const editId=document.getElementById('md-id').value;
   const exec=document.getElementById('md-executor').value;
-  const obj={
-    id:editId||gid(), item, setor:document.getElementById('md-setor').value,
-    prio:document.getElementById('md-prio').value, desc:document.getElementById('md-desc').value,
-    executor:exec, prazo:document.getElementById('md-prazo').value,
-    custo:document.getElementById('md-custo').value,
-    status:editId?document.getElementById('md-status').value:'⏳ Pendente',
-    solucao:editId?document.getElementById('md-solucao').value:'',
-    fornecedor:document.getElementById('md-fornecedor').value.trim(),
-    abertoPor:editId?(S.demandas.find(x=>x.id===editId)||{}).abertoPor||S.cu.nome:S.cu.nome,
-    criadoEm:editId?(S.demandas.find(x=>x.id===editId)||{}).criadoEm||Date.now():Date.now(),
-    atualizadoEm:Date.now(),
-    // Se executor=Flavinho, cópia automática para Ronaldo
-    copiaPara:exec==='Flavinho'?'Ronaldo':null,
-  };
-  if(editId){const idx=S.demandas.findIndex(x=>x.id===editId);if(idx>=0)S.demandas[idx]=obj;}
-  else S.demandas.unshift(obj);
-  save();closeModal('modal-dem');refreshAllViews();
-  toast(editId?'Demanda atualizada!':'Demanda aberta!','success');
-  if(!editId&&exec==='Flavinho') toast('📋 Ronaldo notificado como supervisor','info');
-  syncUpsertDemanda(obj);
+  const fotoInput=document.getElementById('md-foto');
+  const existente=editId?S.demandas.find(x=>x.id===editId):null;
+
+  function finalizarSalvar(fotoData){
+    const obj={
+      id:editId||gid(), item, setor:document.getElementById('md-setor').value,
+      prio:document.getElementById('md-prio').value, desc:document.getElementById('md-desc').value,
+      executor:exec, prazo:document.getElementById('md-prazo').value,
+      custo:document.getElementById('md-custo').value,
+      status:editId?document.getElementById('md-status').value:'⏳ Pendente',
+      solucao:editId?document.getElementById('md-solucao').value:'',
+      fornecedor:document.getElementById('md-fornecedor').value.trim(),
+      abertoPor:editId?(existente||{}).abertoPor||S.cu.nome:S.cu.nome,
+      criadoEm:editId?(existente||{}).criadoEm||Date.now():Date.now(),
+      atualizadoEm:Date.now(),
+      foto:fotoData||(existente&&existente.foto)||'',
+      // Se executor=Flavinho, cópia automática para Ronaldo
+      copiaPara:exec==='Flavinho'?'Ronaldo':null,
+    };
+    if(editId){const idx=S.demandas.findIndex(x=>x.id===editId);if(idx>=0)S.demandas[idx]=obj;}
+    else S.demandas.unshift(obj);
+    save();closeModal('modal-dem');refreshAllViews();
+    toast(editId?'Demanda atualizada!':'Demanda aberta!','success');
+    syncUpsertDemanda(obj);
+
+    // Notificação por WhatsApp — apenas ao ABRIR uma demanda nova (não em edições)
+    if(!editId){
+      const destinatarios=['Cristiano', obj.executor, obj.copiaPara];
+      const msg=`🚨 *Nova Demanda* — Ilha do Caranguejo\n\n📋 ${obj.item}\n📍 ${obj.setor}\n⚡ Prioridade: ${obj.prio}\n👤 Aberto por: ${obj.abertoPor}\n🔧 Executor: ${obj.executor}\n📅 Prazo: ${obj.prazo?fmtDate(obj.prazo):'sem prazo'}${obj.desc?`\n💬 ${obj.desc}`:''}\n\nAcesse: ${APP_URL}`;
+      const n=notificarWhatsApp(destinatarios,msg);
+      if(n>0) toast(`📲 WhatsApp enviado para ${n} pessoa(s)`,'info');
+    }
+  }
+
+  if(fotoInput.files[0]){
+    const reader=new FileReader();
+    reader.onload=e=>finalizarSalvar(e.target.result);
+    reader.readAsDataURL(fotoInput.files[0]);
+  } else {
+    finalizarSalvar(null);
+  }
 }
 
 // ════════════════════════════════════════════════════════

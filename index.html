@@ -830,7 +830,19 @@ function mapUserFromDb(r){ return {id:r.id, nome:r.nome, senha:r.senha, cargo:r.
 function mapUserToDb(u){ return {id:u.id, nome:u.nome, senha:u.senha, cargo:u.cargo||'', perfil:u.perfil, ativo:u.ativo!==false}; }
 function mapDemFromDb(r){ return {id:r.id, item:r.item, setor:r.setor, desc:r.descricao, prio:r.prio, executor:r.executor,
   prazo:r.prazo, custo:r.custo, status:r.status, solucao:r.solucao, abertoPor:r.aberto_por, copiaPara:r.copia_para,
-  origem:r.origem, origemTaskId:r.origem_task_id, foto:r.foto, fornecedor:r.fornecedor||'', criadoEm:new Date(r.created_at).getTime(), atualizadoEm:new Date(r.atualizado_em||r.created_at).getTime() }; }
+  origem:r.origem, origemTaskId:r.origem_task_id, foto:r.foto||'', fornecedor:r.fornecedor||'', criadoEm:new Date(r.created_at).getTime(), atualizadoEm:new Date(r.atualizado_em||r.created_at).getTime() }; }
+
+// Busca a foto de UMA demanda/tarefa sob demanda (evita carregar todas de uma vez)
+async function carregarFotoDemanda(id){
+  if(!ONLINE) return null;
+  try{ const {data,error}=await sb.from('demandas').select('foto').eq('id',id).single(); if(error) throw error; return data?.foto||null; }
+  catch(e){ console.warn('Falha ao carregar foto da demanda',e); return null; }
+}
+async function carregarFotoTask(id){
+  if(!ONLINE) return null;
+  try{ const {data,error}=await sb.from('tarefas').select('foto').eq('id',id).single(); if(error) throw error; return data?.foto||null; }
+  catch(e){ console.warn('Falha ao carregar foto da tarefa',e); return null; }
+}
 function mapDemToDb(d){ return {id:d.id, item:d.item, setor:d.setor, descricao:d.desc||'', prio:d.prio, executor:d.executor,
   prazo:d.prazo||null, custo:d.custo?parseFloat(d.custo):null, status:d.status, solucao:d.solucao||'', aberto_por:d.abertoPor,
   copia_para:d.copiaPara, origem:d.origem||null, origem_task_id:d.origemTaskId||null, foto:d.foto||null, fornecedor:d.fornecedor||null,
@@ -1167,6 +1179,34 @@ function previewFoto(inputId,imgId){
   reader.readAsDataURL(file);
 }
 
+// Redimensiona/comprime a foto antes de virar base64. Fotos de câmera costumam
+// vir com vários MB — sem isso, o banco de dados trava (fica muito pesado para
+// carregar em todos os aparelhos). Aqui limitamos a 1280px no maior lado e
+// convertemos para JPEG com qualidade 0.72 (normalmente resulta em ~50-200KB).
+function comprimirFoto(file, maxDim=1280, qualidade=0.72){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const img=new window.Image();
+      img.onload=()=>{
+        let w=img.width, h=img.height;
+        if(w>maxDim||h>maxDim){
+          if(w>h){ h=Math.round(h*maxDim/w); w=maxDim; }
+          else { w=Math.round(w*maxDim/h); h=maxDim; }
+        }
+        const canvas=document.createElement('canvas');
+        canvas.width=w; canvas.height=h;
+        canvas.getContext('2d').drawImage(img,0,0,w,h);
+        resolve(canvas.toDataURL('image/jpeg',qualidade));
+      };
+      img.onerror=()=>reject(new Error('Falha ao carregar imagem'));
+      img.src=e.target.result;
+    };
+    reader.onerror=()=>reject(new Error('Falha ao ler arquivo'));
+    reader.readAsDataURL(file);
+  });
+}
+
 function toggleNcSection(){
   const checked=document.getElementById('mt-is-nc').checked;
   document.getElementById('mt-nc-section').style.display=checked?'block':'none';
@@ -1183,7 +1223,12 @@ function abrirTask(semId,taskId){
   document.getElementById('mt-obs').value=t.obs||'';
   document.getElementById('mt-foto').value='';
   const prev=document.getElementById('mt-foto-preview');
-  if(t.foto){ prev.src=t.foto; prev.style.display='block'; } else { prev.style.display='none'; prev.src=''; }
+  prev.style.display='none'; prev.src='';
+  if(t.foto){
+    prev.src=t.foto; prev.style.display='block';
+  } else {
+    carregarFotoTask(t.id).then(foto=>{ if(foto){ t.foto=foto; prev.src=foto; prev.style.display='block'; } });
+  }
   document.getElementById('mt-is-nc').checked=!!t.nc;
   document.getElementById('mt-prazo').value=addDays(sem.dataVistoria,14);
   document.getElementById('mt-executor').value='Flavinho';
@@ -1252,11 +1297,9 @@ function salvarTask(){
     syncUpsertTask(t,_curSemId);
   }
 
-  // Se há foto nova selecionada, converte para base64 antes de salvar
+  // Se há foto nova selecionada, comprime e converte para base64 antes de salvar
   if(fotoInput.files[0]){
-    const reader=new FileReader();
-    reader.onload=e=>finalizarSalvar(e.target.result);
-    reader.readAsDataURL(fotoInput.files[0]);
+    comprimirFoto(fotoInput.files[0]).then(finalizarSalvar).catch(()=>finalizarSalvar(null));
   } else {
     finalizarSalvar(null);
   }
@@ -1474,7 +1517,12 @@ function abrirDetalheDem(id){
     toggleFornecedor();
     document.getElementById('md-foto').value='';
     const mdPrev=document.getElementById('md-foto-preview');
-    if(d.foto){ mdPrev.src=d.foto; mdPrev.style.display='block'; } else { mdPrev.style.display='none'; mdPrev.src=''; }
+    mdPrev.style.display='none'; mdPrev.src='';
+    if(d.foto){
+      mdPrev.src=d.foto; mdPrev.style.display='block';
+    } else {
+      carregarFotoDemanda(d.id).then(foto=>{ if(foto){ d.foto=foto; mdPrev.src=foto; mdPrev.style.display='block'; } });
+    }
     openModal('modal-dem');
   }
 }
@@ -1519,9 +1567,7 @@ function salvarDemanda(){
   }
 
   if(fotoInput.files[0]){
-    const reader=new FileReader();
-    reader.onload=e=>finalizarSalvar(e.target.result);
-    reader.readAsDataURL(fotoInput.files[0]);
+    comprimirFoto(fotoInput.files[0]).then(finalizarSalvar).catch(()=>finalizarSalvar(null));
   } else {
     finalizarSalvar(null);
   }

@@ -856,10 +856,16 @@ function mapTaskToDb(t,semId){ return {id:t.id, semana_id:semId, nome:t.nome, se
 async function loadFromSupabase(){
   if(!ONLINE) return false;
   try{
+    // IMPORTANTE: não selecionamos a coluna 'foto' aqui — fotos são base64 e podem
+    // ter vários MB cada. Puxar todas de uma vez derruba a API (erro 500) e quebra
+    // a sincronização entre aparelhos. A foto é buscada sob demanda (1 registro por vez)
+    // quando o usuário realmente abre o detalhe da demanda/tarefa.
+    const DEM_COLS = 'id,item,setor,descricao,prio,executor,prazo,custo,status,solucao,aberto_por,copia_para,origem,origem_task_id,fornecedor,created_at,atualizado_em';
+    const TASK_COLS = 'id,semana_id,nome,setor,dia,prio,status,obs,nc,atualizado_em,atualizado_por';
     const [u,e,dm,sm] = await Promise.all([
       sb.from('usuarios').select('*').order('nome'),
       sb.from('equipamentos').select('*').order('nome'),
-      sb.from('demandas').select('*').order('created_at',{ascending:false}),
+      sb.from('demandas').select(DEM_COLS).order('created_at',{ascending:false}),
       sb.from('semanas').select('*').order('data_vistoria',{ascending:false}),
     ]);
     if(u.error||e.error||dm.error||sm.error) throw (u.error||e.error||dm.error||sm.error);
@@ -872,7 +878,7 @@ async function loadFromSupabase(){
     // Carregar tarefas de todas as semanas
     if(S.semanas.length){
       const semIds = S.semanas.map(s=>s.id);
-      const {data:tasks, error:terr} = await sb.from('tarefas').select('*').in('semana_id',semIds);
+      const {data:tasks, error:terr} = await sb.from('tarefas').select(TASK_COLS).in('semana_id',semIds);
       if(!terr && tasks){
         S.semanas.forEach(sem=>{
           sem.tarefas = tasks.filter(t=>t.semana_id===sem.id).map(mapTaskFromDb);
